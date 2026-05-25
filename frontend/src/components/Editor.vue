@@ -13,6 +13,11 @@ const selectedFont = ref('')
 const fontsLoading = ref(true)
 const backgroundData = ref(null)
 
+const presets = ref([])
+const presetsLoading = ref(true)
+const selectedPreset = ref('')
+const presetBlob = ref(null)
+
 const options = reactive({
   fontSize: 32,
   lineSpacing: 1.8,
@@ -50,6 +55,16 @@ onMounted(async () => {
   } finally {
     fontsLoading.value = false
   }
+
+  // 加载预设背景
+  try {
+    const resp = await fetch('/api/presets')
+    presets.value = await resp.json()
+  } catch (e) {
+    console.error('获取预设背景失败', e)
+  } finally {
+    presetsLoading.value = false
+  }
 })
 
 function setFont(name) {
@@ -58,6 +73,40 @@ function setFont(name) {
 
 function onBackgroundChange(data) {
   backgroundData.value = data
+  // 上传自定义图片时清除预设高亮（新 blob 不同于 presetBlob）
+  if (data && presetBlob.value && data.blob !== presetBlob.value) {
+    selectedPreset.value = ''
+    presetBlob.value = null
+  }
+}
+
+async function selectPreset(preset) {
+  try {
+    const resp = await fetch(`/presets/${preset.file}`)
+    const blob = await resp.blob()
+    presetBlob.value = blob
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      backgroundData.value = {
+        blob,
+        points: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+        naturalWidth: img.naturalWidth,
+        naturalHeight: img.naturalHeight,
+      }
+      selectedPreset.value = preset.file
+      URL.revokeObjectURL(url)
+    }
+    img.src = url
+  } catch (e) {
+    console.error('加载预设背景失败', e)
+  }
+}
+
+function clearPreset() {
+  selectedPreset.value = ''
+  presetBlob.value = null
+  backgroundData.value = null
 }
 
 function onSubmit() {
@@ -70,8 +119,44 @@ function onSubmit() {
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
     <h2 class="text-lg font-semibold text-gray-700 mb-4">文本编辑</h2>
 
+    <!-- 预设背景 -->
+    <div class="mb-4">
+      <label class="block text-sm text-gray-600 mb-2">预设背景</label>
+      <div v-if="presetsLoading" class="text-sm text-gray-400 py-2">加载中...</div>
+      <div v-else-if="presets.length === 0" class="text-sm text-gray-400 py-2">暂无预设</div>
+      <div v-else class="grid grid-cols-3 gap-2">
+        <button
+          v-for="preset in presets"
+          :key="preset.file"
+          @click="selectPreset(preset)"
+          :class="[
+            'relative aspect-[4/3] rounded-lg overflow-hidden border-2 transition-colors',
+            selectedPreset === preset.file
+              ? 'border-blue-500 ring-2 ring-blue-300'
+              : 'border-gray-200 hover:border-blue-400'
+          ]"
+        >
+          <img
+            :src="`/presets/${preset.file}`"
+            :alt="preset.name"
+            class="w-full h-full object-cover"
+            loading="lazy"
+          />
+          <span
+            class="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs px-1 py-0.5 truncate text-center"
+          >{{ preset.name }}</span>
+        </button>
+      </div>
+      <div v-if="selectedPreset" class="mt-1">
+        <button
+          @click="clearPreset"
+          class="text-xs px-2 py-0.5 bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors"
+        >清除预设</button>
+      </div>
+    </div>
+
     <!-- 背景上传 -->
-    <BackgroundUploader @update:background="onBackgroundChange" />
+    <BackgroundUploader :external-image="presetBlob ? { blob: presetBlob } : null" @update:background="onBackgroundChange" />
 
     <!-- 字体选择 -->
     <div class="mb-4">

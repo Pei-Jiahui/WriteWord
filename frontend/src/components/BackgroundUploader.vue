@@ -3,6 +3,10 @@ import { ref, nextTick, watch } from 'vue'
 
 const emit = defineEmits(['update:background'])
 
+const props = defineProps({
+  externalImage: { type: Object, default: null },
+})
+
 const fileInput = ref(null)
 const previewUrl = ref(null)
 const imgRef = ref(null)
@@ -156,23 +160,25 @@ async function handleFile(e) {
   const file = e.target.files?.[0]
   if (!file) return
   const compressed = await compressImage(file)
-  currentBlob.value = compressed
+  await loadBlob(compressed)
+}
 
-  // 获取压缩后图片的原始尺寸
+async function loadBlob(blob) {
+  currentBlob.value = blob
+
+  // 获取原始尺寸
   const img = new Image()
   img.onload = () => {
     naturalSize.value = { width: img.naturalWidth, height: img.naturalHeight }
     URL.revokeObjectURL(img.src)
-    // naturalSize 就绪后才能通知父组件，否则坐标乘以 0 全变 [0,0]
     notifyParent()
   }
-  img.src = URL.createObjectURL(compressed)
+  img.src = URL.createObjectURL(blob)
 
-  previewUrl.value = URL.createObjectURL(compressed)
+  previewUrl.value = URL.createObjectURL(blob)
   hasImage.value = true
   await nextTick()
   drawCanvas()
-  // 注意：notifyParent 已移到 img.onload 内部，这里不能调！
 }
 
 function notifyParent() {
@@ -199,6 +205,13 @@ function resetPoints() {
 }
 
 watch(points, () => { nextTick(drawCanvas) }, { deep: true })
+
+watch(() => props.externalImage?.blob ?? null, (blob) => {
+  if (blob) {
+    points.value = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
+    loadBlob(blob)
+  }
+})
 </script>
 
 <template>

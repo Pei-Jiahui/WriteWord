@@ -13,7 +13,9 @@ import json
 from PIL import Image
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.engine.renderer import render_handwriting, RenderOptions
@@ -21,7 +23,31 @@ from backend.engine.warper import render_custom_background, render_with_template
 
 app = FastAPI(title="WriteWords", version="0.1.0")
 
+# CORS — 生产环境替换为实际域名
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 前端构建产物（生产环境）
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_frontend_index():
+        return FileResponse(str(FRONTEND_DIST / "index.html"), media_type="text/html")
+
+
+# 添加 favicon.ico（避免 404）
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
+
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+PRESETS_DIR = Path(__file__).resolve().parent / "presets"
 
 
 def _get_available_fonts() -> List[Dict[str, str]]:
@@ -146,6 +172,27 @@ async def list_templates():
     templates_dir = Path(__file__).resolve().parent / "assets"
     images = list(templates_dir.glob("*.jpg")) + list(templates_dir.glob("*.png"))
     return [{"id": "template_v1", "description": "带标题的照片模板", "image": f.name} for f in images[:1]]
+
+
+@app.get("/api/presets")
+async def list_presets():
+    """返回预设背景图片列表。"""
+    if not PRESETS_DIR.exists():
+        return []
+    presets = []
+    for f in sorted(PRESETS_DIR.glob("*.jpg")) + sorted(PRESETS_DIR.glob("*.png")):
+        presets.append({"name": f.stem, "file": f.name})
+    return presets
+
+
+@app.get("/presets/{file_name:path}")
+async def serve_preset(file_name: str):
+    """提供预设背景图片。"""
+    safe_name = Path(file_name).name
+    preset_path = PRESETS_DIR / safe_name
+    if not preset_path.exists():
+        raise HTTPException(status_code=404, detail="预设图片不存在")
+    return FileResponse(preset_path)
 
 
 @app.post("/api/render/template")
